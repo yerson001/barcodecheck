@@ -1,0 +1,11 @@
+{
+    "idf.pythonInstallPath": "/home/yrsn/.espressif/python_env/idf5.4_py3.8_env/bin/python",
+    "idf.port": "/dev/ttyUSB0",
+    "files.associations": {
+        ".vimrc": "cuda-cpp",
+        "logger.h": "c",
+        "array": "c",
+        "string": "c",
+        "string_view": "c"
+    }
+}
