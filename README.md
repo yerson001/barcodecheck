@@ -115,174 +115,57 @@ newgrp dialout
 
 ## 🔁 Script automático de flasheo
 
-Crea un archivo `flash_auto.sh`:
+¡Buena observación!  
+En un diseño eficiente y simple, **no necesitas una tarea extra solo para verificar almacenamiento o conectividad**. El flujo puede ser así:
 
-```bash
-#!/bin/bash
-PORT=$(ls /dev/ttyUSB* 2>/dev/null | head -n 1)
-if [ -z "$PORT" ]; then
-    echo "❌ No se encontró ningún dispositivo /dev/ttyUSB"
-else
-    echo "✅ Puerto detectado: $PORT"
-    idf.py -p "$PORT" flash monitor
-fi
-```
+- El **scanner** pone datos en la cola.
+- El **sender** toma de la cola y:
+  - Si hay internet, envía.
+  - Si no hay, guarda en storage.
 
-Hazlo ejecutable:
+Luego, el **sender** puede, cada cierto tiempo, revisar si hay datos guardados y si ya hay internet, los envía.  
+Así, solo necesitas dos tareas principales:  
+1. **scanner_task** (escaneo y push a la cola)  
+2. **sender_task** (consume la cola, decide enviar o guardar, y reintenta lo guardado si hay red)
 
-```bash
-chmod +x flash_auto.sh
-./flash_auto.sh
-```
+Esto mantiene el sistema simple y eficiente, usando bien las colas de FreeRTOS.  
+¿Quieres un ejemplo de cómo quedaría ese sender_task?
 
----
 
-## 📁 Estructura recomendada del proyecto
-
-```
-barcodecheck/
-├── CMakeLists.txt
-├── main/
-│   ├── app_main.c
-│   └── CMakeLists.txt
-├── components/
-│   └── gm75_scanner/
-│       ├── gm75_scanner.c
-│       ├── gm75_scanner.h
-│       └── CMakeLists.txt
-├── build/
-└── sdkconfig
-```
-
----
-
-## ✅ Recursos
-
-- [Documentación oficial ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/index.html)
-- [Component Registry](https://components.espressif.com/)
-
-SPIFFS
+[gm75_scanner] 
+      |
+      v
+   [queue] 
+      |
+      v
+   [cipher] (opcional)
+      |
+      v
+   [sender] ---(consulta)---> [connectivity]
+      |                             |
+      |<---¿hay internet?---Sí------+
+      |                             |
+      |---No------------------------+
+      v
+ [storage] <---+
+      ^        |
+      |        |
+      +--------+
+  (sender revisa storage periódicamente y reintenta si hay internet)
 
 
 
-# 📦 Módulo de Almacenamiento (storage)
-
-Este módulo se encarga de guardar localmente los datos escaneados (por ejemplo, DNIs o códigos QR) cuando no hay conexión a internet, y de recuperar y eliminar los registros una vez enviados.
-
-## 📁 Estructura
-
-components/
-└── storage/
-├── storage.c
-├── storage.h
-└── CMakeLists.txt
-
-csharp
-Copiar
-Editar
-
-## ✅ Funcionalidades esperadas
-
-- Inicializar SPIFFS.
-- Guardar un registro (por ejemplo, DNI).
-- Leer todos los registros pendientes.
-- Eliminar los registros luego de enviarlos.
-- Manejar errores y mostrar logs en caso de fallo.
-
-## ✨ API esperada (`storage.h`)
-
-```c
-#pragma once
-
-#include <stdbool.h>
-
-bool storage_init(void);
-bool storage_save_record(const char* record);
-int  storage_get_all(char output[][64], int max_records);
-bool storage_clear_all(void);
-⚙️ Implementación básica (storage.c)
-c
-Copiar
-Editar
-#include <stdio.h>
-#include <string.h>
-#include "esp_spiffs.h"
+  #include <stdio.h>
+#include "gm75_scanner.h"
 #include "esp_log.h"
-#include "storage.h"
+#include "logger.h"
 
-#define STORAGE_FILE "/spiffs/pending.txt"
-static const char* TAG = "Storage";
-
-bool storage_init(void) {
-    esp_vfs_spiffs_conf_t conf = {
-        .base_path = "/spiffs",
-        .partition_label = NULL,
-        .max_files = 5,
-        .format_if_mount_failed = true
-    };
-    esp_err_t ret = esp_vfs_spiffs_register(&conf);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Error al montar SPIFFS");
-        return false;
-    }
-    return true;
+void app_main(void) {
+    ESP_LOGI("APP", "Iniciando ColeCheck Scanner...");
+    LOG_SEPARATOR();
+    LOG_INFO("hola");
+    LOG_SEPARATOR();
+    //gm75_scanner_init();
+    //gm75_scanner_start();
 }
 
-bool storage_save_record(const char* record) {
-    FILE* f = fopen(STORAGE_FILE, "a");
-    if (!f) {
-        ESP_LOGE(TAG, "No se pudo abrir el archivo");
-        return false;
-    }
-    fprintf(f, "%s\n", record);
-    fclose(f);
-    return true;
-}
-
-int storage_get_all(char output[][64], int max_records) {
-    FILE* f = fopen(STORAGE_FILE, "r");
-    if (!f) return 0;
-
-    int count = 0;
-    while (fgets(output[count], 64, f) && count < max_records) {
-        // Eliminar salto de línea
-        char* nl = strchr(output[count], '\n');
-        if (nl) *nl = '\0';
-        count++;
-    }
-    fclose(f);
-    return count;
-}
-
-bool storage_clear_all(void) {
-    return remove(STORAGE_FILE) == 0;
-}
-📌 CMakeLists.txt
-cmake
-Copiar
-Editar
-idf_component_register(SRCS "storage.c"
-                       INCLUDE_DIRS "."
-                       PRIV_REQUIRES esp_spiffs esp_log)
-💡 Uso típico
-En sender_task, cuando se detecta que no hay red:
-
-c
-Copiar
-Editar
-if (!network_is_connected()) {
-    storage_save_record(dni);
-} else {
-    send_to_api(dni);
-}
-Y cuando se recupere la conexión:
-
-c
-Copiar
-Editar
-char records[20][64];
-int count = storage_get_all(records, 20);
-for (int i = 0; i < count; ++i) {
-    send_to_api(records[i]);
-}
-storage_clear_all();
