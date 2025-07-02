@@ -6,7 +6,7 @@ extern "C" {
 
 void gm75_scanner_init(void);
 void gm75_scanner_start(void);  
-
+void scanner_test(void *pv);
 
 #ifdef __cplusplus
 }

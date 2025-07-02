@@ -6,6 +6,10 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "gm75_scanner.h"
+#include "esp_random.h"
+#include "attendance_data.h"
+#include "attendance_queue.h"
+#include "logger.h"
 
 #define TAG "GM75_SCANNER"
 #define UART_NUM_GM75 UART_NUM_2
@@ -59,7 +63,7 @@ static void gm75_task(void *pvParameters)
             if (strlen((char *)data) > 0)
             {
                 ESP_LOGI(TAG, "Código escaneado: %s", data);
-                char *descifrado = cesar_decrypt((const char*)data, 3); 
+                char *descifrado = cesar_decrypt((const char *)data, 3);
                 if (descifrado)
                 {
                     printf("QR desencriptado: %s\n", descifrado);
@@ -72,4 +76,34 @@ static void gm75_task(void *pvParameters)
     }
 
     free(data);
+}
+
+void scanner_test(void *pv)
+{
+    int count = 0;
+    while (1)
+    {
+        AttendanceData data;
+        snprintf(data.dni, sizeof(data.dni), "DNI%03d", count);
+        strcpy(data.type, (count % 2 == 0) ? "entrance" : "exit");
+        snprintf(data.timestamp, sizeof(data.timestamp), "2025-07-01 15:%02d:00", count % 60);
+
+        if (xQueueSend(queue_get_handle_list(), &data, pdMS_TO_TICKS(1000)) == pdPASS)
+        {
+            LOG_SEPARATOR();
+            LOG_INFO("GM75SCANNER");
+            ESP_LOGI(TAG, "Enviado: %s, %s, %s", data.dni, data.type, data.timestamp);
+            LOG_SEPARATOR();
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Cola llena, no se pudo enviar");
+        }
+        count++;
+        // UBaseType_t free_stack = uxTaskGetStackHighWaterMark(NULL);
+        //  printf("Stack libre SCANNER (en palabras): %u\n", free_stack);
+        //   Retardo aleatorio entre 2000 ms (2s) y 6000 ms (6s)
+        uint32_t delay_ms = 2000 + (esp_random() % 4001); // 4001 para incluir hasta 6000
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    }
 }
